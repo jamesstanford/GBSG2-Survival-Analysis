@@ -26,7 +26,7 @@ The dataset contains more patients than were randomised in the original trial, a
 |---|---|
 | Unadjusted | 0.69 (0.54 to 0.89) |
 | Adjusted, final model | 0.69 (0.53 to 0.88) |
-| Stratified by tumour grade | 0.68 (0.53 to 0.88) |
+| Stratified model | 0.68 (0.53 to 0.88) |
 
 - Hormonal therapy was associated with an estimated **31% lower hazard of recurrence**. The estimate was stable across model specifications and sensitivity analyses.
 - Three-year recurrence-free survival was 71% with hormonal therapy, compared with 61% without.
