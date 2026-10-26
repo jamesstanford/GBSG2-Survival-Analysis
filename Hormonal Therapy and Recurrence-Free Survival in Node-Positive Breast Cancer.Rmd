@@ -1,0 +1,410 @@
+---
+title: "Hormonal Therapy and Recurrence-Free Survival in Node-Positive Breast Cancer"
+author: "James Stanford"
+output: pdf_document
+header-includes:
+  - \usepackage{float}
+  - \floatplacement{table}{H}
+---
+
+```{r setup , include = FALSE}
+library(tidyverse) ; library(TH.data) ; library(ggplot2) ; library(ggsurvfit) ; library(survival) ; library(lubridate) ; library(gtsummary)
+
+knitr::opts_chunk$set(comment = NA , echo = FALSE , warning = FALSE , message = FALSE ,
+                      fig.align = "center" , fig.width = 7 , fig.height = 4.5)
+theme_gtsummary_printer(print_engine = "kable")
+```
+
+
+## 1 - Clinical Background and Research Question
+
+The patients in the dataset are patients with node-positive breast cancer. This means that the cancer cells from the primary tumour have spread to at least one nearby lymph node. The outcome that we are interested in is recurrence-free survival, that is, the time from the study entry until the breast cancer recurs.
+
+The variable horTh indicates whether the patient received hormonal therapy (tamoxifen). The research question is whether patients who received hormonal therapy experienced longer recurrence-free survival than those who did not, and whether any association remains after accounting for baseline patient and tumour characteristics.
+
+
+## 2 - Data
+
+### 2.1 - Dataset
+
+The dataset we will study is the German Breast Cancer Study Group 2 (GBSG2) study (M Schumacher et al, 1994). This study compares the effectiveness of three vs six cycles of chemotherapy with or without tamoxifen, with the aim of comparing recurrence-free and overall survival between the different treatment groups. In the dataset, the variable `horTh` indicates whether the individual received tamoxifen. There are 686 observations, all who have full covariate data, which is more than the 473 individuals in the randomised trial in the Schumacher et al. study. This means that we cannot assume that the treatment was randomly assigned to all individuals in the GBSG2 dataset. 
+
+
+### 2.2 - Endpoint and Censoring
+
+The data shows that there were 299 events (where the breast cancer recurred), and 387 censored observations, so around 56.4% of individuals were censored. Censored here means that when the patient was last followed up, they did not have a recurrence. The actual recurrence-free survival time is not known, due to loss of follow up (the individual left the study), or the study ended before the cancer recurred in the individual. 
+
+### 2.3 - Baseline Characteristics
+
+The baseline variables in the dataset are age, menopausal status (pre or post), tumour size, tumour grade, number of positive nodes, progesterone receptor, oestrogen receptor.
+
+The outcomes are time of recurrence-free survival, and whether the data was censored (0 - censored, 1 - event). The treatment is horTh, which is the hormonal therapy treatment the patient is receiving.
+
+
+```{r baseling char , echo = FALSE}
+GBSG2 %>%
+  dplyr::select(horTh, age, menostat, tsize, tgrade, pnodes, progrec, estrec) %>%
+  tbl_summary(by = horTh)
+```
+
+From this table, we can see that the median age, and the menopausal status is different between groups. Those in the treatment group are on average 8 years older, and are 28 percentage points higher rate of being post menopause. This strongly suggests that the treatment was not randomly assigned, and hence we must have this in mind throughout the analysis, and adjust our models accordingly.
+
+
+
+## 3 - Non-parametric Survival Analysis
+
+### 3.1 - Kaplan–Meier Estimates by Hormonal Therapy
+
+Kaplan-Meier curves are one of most commonly used non-parametric method in survival analysis. Non-parametric means it does not assume an underlying distribution from the data. Kaplan-Meier curves have the cumulative probability of the event *not* occurring on the y-axis, and time on the x-axis.
+
+First, we plot two Kaplan-Meier curves, one for the group who received treatment and one for the group who did not. The curves have a confidence interval around them, and a risk table is included in the plot.
+
+```{r K-M plot by horTh , echo = FALSE}
+survfit2(Surv(time, cens) ~ horTh, data = GBSG2) %>% 
+  ggsurvfit() +
+  labs(x = "Days" , 
+       y = "RFS probability" ,
+     colour = "Hormone Therapy" ,
+     fill = "Hormone Therapy") +
+  add_confidence_interval() + 
+  add_risktable()
+```
+
+We can see from the plot that those who received hormonal therapy consistently have higher recurrence-free survival, and the gap widens over time. The risk table tells us how many individuals are at risk after 0, 1000 and 2000 days, and how many events have occurred. The number of individuals in both groups reduce steadily due to events and censoring, and so should be interpreted with censoring in mind and sample size in mind.
+
+
+
+
+
+### 3.2 - Median Recurrence-Free Survival
+
+We can use the Kaplan-Meier plots to estimate the median recurrence-free survival times for each group. This is done by finding the number of days at which the recurrence-free survival probability is at 0.5. This is done using the `survfit` function. 
+
+```{r median recurrence-free survival , echo = FALSE}
+mdl_horTh <- survfit(Surv(time , cens) ~ horTh , data = GBSG2)
+
+mdl_horTh %>%
+  tbl_survfit(probs = 0.5 , label_header = "**Median RFS, days (95% CI)**")
+```
+
+From the output we can see that for those without hormonal therapy there is a median recurrence-free survival time of 1528 and for those with hormonal therapy this increases to 2018 days. So, there is a difference of around 490 days. (The upper value of the 95% CI for horTh = yes cannot be computed as the upper CI for the yes group never falls below 0.5 during the follow up period.)
+
+
+### 3.3 - Three-Year Recurrence-Free Survival
+
+Now, we may be interested in the probability an individual has recurrence-free survival of three years. Again we use the `survfit` function.
+
+```{r 3 year R-FS , echo = FALSE}
+mdl_horTh %>%
+  tbl_survfit(times = 365.25 * 3 , label_header = "**Three-Year RFS, probability (95% CI)**")
+```
+
+This shows that there is a 61% vs 71% RFS probability for those without hormone therapy vs those with it. This is a difference of around 10%. 
+
+
+### 3.4 - Log-Rank Comparison
+
+The log-rank test is a hypothesis test which tests whether the survival functions of the two groups are different. For our data, we have,
+
+$$
+\begin{aligned}
+H_0 &: \text{recurrence-free survival is the same in both groups} \\
+H_1 &: \text{recurrence-free survival differs between the groups}
+\end{aligned}
+$$
+
+That is, we are testing whether the survival experience of the group who received hormone therapy is different from those who did not receive hormone therapy.
+
+
+```{r log-rank test , echo = FALSE}
+log_rank_test <- survdiff(Surv(time , cens) ~ horTh , data = GBSG2)
+
+#tbl_summary(log_rank_test)
+
+print(log_rank_test)
+
+```
+
+We get a p value of $0.003$, which shows there is sufficient evidence to reject the null hypothesis and conclude that there is evidence that the survival experience of those receiving hormonal therapy is different to those who are not receiving it. This gives us further evidence that individuals receiving hormonal therapy had significantly longer recurrence-free survival times.
+
+
+### 3.5 - Selected Prognostic Characteristics
+
+We also may be interested in how Kaplan-Meier curves differ for individuals with different prognostic characteristics. We will plot curves for tumour grade and menopausal status.
+
+```{r K-M curves prognostic char , echo = FALSE}
+survfit2(Surv(time , cens) ~ tgrade , data = GBSG2) %>%
+  ggsurvfit() +
+  labs(
+    x = "Days" ,
+    y = "RFS probability" ,
+    colour = "Tumour Grade"
+  ) +
+  add_confidence_interval() +
+  add_risktable()
+
+survfit2(Surv(time , cens) ~ menostat , data = GBSG2) %>%
+  ggsurvfit() +
+  labs(x = "Days" , 
+       y = "RFS probability" ,
+     colour = "Menopausal Status" ,
+     fill = "Menopausal Status") +
+  add_confidence_interval() +
+  add_risktable()
+```
+
+From these plots we can see that individuals with grade I tumours clearly had better recurrence-free survival than those with grade II or III tumours. However, the grade I group is relatively small, so Kaplan-Meier estimates are not precise. Higher grade tumours are less differentiated, meaning their cells look less like normal breast tissue. This means that they grow and spread faster and more aggressively, and this is reflected in the higher risk of recurrence among the groups with higher grade tumours.
+
+On the other hand, we can see that no clear pattern emerges based on menopausal status, showing there is not sufficient evidence that there is a clear difference in RFS probability by menopausal status. 
+
+
+## 4 - Cox Proportional-Hazards Modelling
+
+### 4.1 - Unadjusted effect of hormonal therapy
+
+The Cox proportional-hazards model is a method of modelling the hazard of recurrence and including a set of covariates. For covariates $X_1, X_2, \dots, X_p$, the hazard for the $i^{\text{th}}$ patient at time $t$ is modelled as
+
+
+$$
+h_i(t) = \exp(\beta_1 x_{1i} + \beta_2 x_{2i} + ... + \beta_p x_{pi})h_0(t)
+$$
+
+where $x_{ji}$ is the value of the $j^{\text{th}}$ covariate of the $i^{\text{th}}$ individual, and $h_0(t)$ is the hazard of an individual with all covariates set to 0. This is the baseline hazard function for a Cox Regression model, of which no modelling assumption is made, hence making the model semi-parametric.
+
+First we fit a model containing only hormonal therapy as a covariate. Let $x_{1i} = 1$ if patient $i$ received hormonal therapy and $x_{1i} = 0$ otherwise. Then,
+
+
+$$
+h_{i}(t) = \begin{cases}
+\exp(\beta_1)h_0(t) & \text{if patient } i \text{ is receiving hormone therapy} \\
+h_0(t)                     & \text{if patient } i \text{ is not receiving hormone therapy} \\
+\end{cases}
+$$
+
+Then, the hazard ratio between the two groups is given by
+
+$$
+\text{HR} = \frac{\exp(\beta_1)\, h_0(t)}{h_0(t)} = \exp(\beta_1).
+$$
+
+Since the baseline hazard cancels out, the hazard ratio is independent of $t$, so the model assumes that the relative effect of hormone therapy is constant throughout the study. This is known as the proportional-hazards assumption and is assessed in Section 5.
+
+We estimate $\beta_1$ by fitting our cox-regression model using the `coxph` function. This gives the estimated hazard ratio $\widehat{\text{HR}} = \exp(\widehat{\beta}_1)$
+
+```{r relative hazard by horTh , echo = FALSE}
+cox_hormonal_unadjusted <- coxph(Surv(time , cens) ~ horTh , data = GBSG2)
+
+tbl_regression(cox_hormonal_unadjusted, exponentiate = TRUE)
+```
+
+The model gives $\widehat{\beta}_1 = -0.3640$.
+
+$$
+\widehat{HR} = \exp({\widehat{\beta}_1}) \approx 0.69
+$$
+Hence, there is a 100% - 69% = 31% estimated lower hazard of recurrence compared to those who did not have hormone therapy.
+
+The Wald test tests for $H_0 : \beta_1 = 0 \quad \text{ vs } \quad H_1:\beta_1 \neq 0$. We get a p value of 0.004, providing sufficient evidence to suggest that $\beta_1 \neq 0$, and so the hazard ratio is not equal to one.
+
+In the clinical context, this tells us that there is sufficient evidence to suggest that the hormone treatment is associated with longer recurrence-free survival times of individuals in this study. However, this is before adjusting for baseline factors, which is important since treatment was not fully randomised. Adjustment will be done in the next section.
+
+### 4.2 - Adjustment for Baseline Characteristics
+
+Now, we wish to fit a cox-regression model which includes the prognostic characteristics, so the model is adjusting for these. We will include all covariates in the model except `menostat`, menopausal status, as it is largely determined by age, which we have already included in the model. The covariates included were selected before any analysis was carried out, and based on clinical reasoning rather than statistical significance, in order to reduce bias.
+
+
+```{r cox adjustment , echo = FALSE}
+GBSG2_factored <- GBSG2 %>%
+  mutate(tgrade = factor(tgrade , ordered = FALSE))
+
+cox_adjusted <- coxph(Surv(time , cens) ~ horTh + pnodes + progrec + tgrade + age + tsize + estrec , data = GBSG2_factored)
+
+tbl_regression(cox_adjusted , exponentiate = TRUE)
+```
+
+After adjusting for the number of positive lymph nodes, progesterone receptor levels, tumour grade, age, tumour size and oestrogen receptor levels, hormonal therapy was found to be associated with an estimated 28% lower hazard of recurrence, with a hazard ratio of 0.72, 95% CI of (0.56, 0.92) and p value of 0.010. This is similar to the unadjusted estimate of $\widehat{HR} = 0.69$. However, the associated decrease in hazard of recurrence is still statistically significant after adjustment. 
+
+The most significant prognostic factors are the number of positive lymph nodes and progesterone receptor levels, both with p values of <0.001. Each hazard ratio is adjusted for the other covariates included in the model. 
+
+
+### 4.3 - Interpretation
+
+The hazard ratio compares the instantaneous rate of recurrence between the two groups, among patients who are still recurrence-free at a given time. Therefore, the adjusted hazard ratio of 0.72 indicates that at any point during follow-up, patients receiving hormone therapy experienced recurrence at an estimated 72% of the rate which untreated patients experienced. However, this does not mean that 28% fewer individuals experienced a recurrence, and does not mean that recurrence was delayed by 28%.
+
+The adjusted estimate compares patients with the same values of the covariates included in the model, all prognostic factors except menopausal status. The model then clearly does not account for any factors which were not measured, which may also be linked to recurrence, or influence the effect of hormone therapy.
+
+Also, since hormone therapy was not randomly assigned for all patients in the dataset, the estimated effect should not be interpreted as a causal effect, but rather associative. Adjustment for the baseline characteristics had a small effect on the estimate, both in this section, and once the form of the covariates were revised in section 5.1. The estimate is also consistent with the original fully randomised trial (RR 0.75, 95% CI 0.54 to 1.04). The wider confidence interval is due to the smaller sample size.
+
+The Kaplan-Meier estimates, log-rank test and both Cox regression models all indicate longer recurrence-free survival for individuals receiving hormone therapy. However, the Cox regression model relies on the proportional-hazards assumptions, and the covariates functional form being correctly included. All of these assumptions will be assessed in Section 5.
+
+
+## 5 - Model Checking
+
+
+
+### 5.1 - Functional form of Covariates
+
+The Cox regression model assumes that the continuous covariates have a linear effect on the log-hazard. For example, pnodes assumes that adding each additional positive lymph node increases the log-hazard linearly by the same factor. For example, the increase in log-hazard from going from 1 to 2 positive nodes is the same as from increasing from 29 to 30 nodes. To assess this assumption, we remove a covariate from the model and refit it, and then we plot the martingale residuals from the reduced model against the omitted covariate. The smoother on each plot approximates the functional form of the covariate's effect on the log-hazard. A smoother which is approximately straight suggests a linear term. We carry out this programme for each continuous covariate in our adjusted model.
+
+```{r functional forms , echo = FALSE}
+all_covariates <- c("horTh", "pnodes", "progrec", "tgrade", "age", "tsize", "estrec")
+
+check_covariate_form <- function(var) {
+  other_covariates <- all_covariates[all_covariates != var]
+  formula <- as.formula(paste("Surv(time, cens) ~", paste(other_covariates, collapse = " + ")))
+  mdl_fit <- coxph(formula , data = GBSG2_factored)
+  resids <- residuals(mdl_fit , type = "martingale")
+  x <- GBSG2_factored[[var]]
+  plot(x , resids , xlab = var , ylab = "Martingale residual" , main = var , pch = 16 , cex = 0.4)
+  lines(lowess(x, resids), col = "red", lwd = 2)
+}
+
+par(mfrow = c(2, 3))
+check_covariate_form("pnodes")
+check_covariate_form("progrec")
+check_covariate_form("tsize")
+check_covariate_form("age")
+check_covariate_form("estrec")
+par(mfrow = c(1, 1))
+```
+
+We can see from the plots the `tsize`and `estrec`are approximately linear, so the assumption holds. However, `pnodes`and `progrec` are not linear. `age` is also not very linear, but there are very few younger patients, so there is not enough evidence to suggest that it violates the assumption. 
+
+Therefore, we will log-transform the covariates that we found to violate the assumption, and adjust our Cox model.
+
+```{r cox revised , echo = FALSE}
+cox_revised <- coxph(Surv(time , cens) ~ horTh + log(pnodes) + log(progrec + 1) + tgrade + age + tsize + estrec , data = GBSG2_factored)
+
+AIC(cox_adjusted , cox_revised)
+tbl_regression(cox_revised , exponentiate = TRUE)
+```
+
+The model with the log-transformed covariates has lower AIC than the original model, and will be used from now on. The estimated effect of hormone therapy was unchanged, so the estimated effectiveness of the treatment does not change due to how the covariates are modelled.
+
+
+### 5.2 - Proportional-hazards assumption
+
+The proportional-hazards assumption is the main underlying assumption of the Cox regression model. It is that the hazard ratio for each covariate is constant over follow-up. To investigate if this assumption holds, we plot the Schoenfeld residuals over time, for each covariate. If the smoother remains relatively flat over time this tells us that the assumption is likely valid.
+
+
+```{r prop hazards assumption , echo = FALSE}
+prop_haz_test <- cox.zph(cox_revised) 
+
+#tests for change in impact of variable over time
+prop_haz_test
+
+par(mfrow = c(2, 4))
+plot(prop_haz_test , pch = 16 , cex = 0.6 , col = "red" , resid = FALSE)
+```
+
+There is no evidence that `horTh` violates the proportional hazards assumption (p =0.6371), and the smoother on the plot is relatively flat. However, the `GLOBAL` test for non-proportionality was significant (p = 0.0026). `tgrade` (p = 0.006), `age` (p = 0.001), `log(progrec + 1)` (p = 0.026) and `estrec` (p = 0.016) indicate non-proportionality. The plots also give evidence for this. We can check whether these covariates affect the treatment estimate by stratifying the model by tumour grade.
+
+```{r stratified cox, echo = FALSE}
+cox_strated <- coxph(Surv(time , cens) ~ horTh + log(pnodes) + log(progrec + 1) + strata(tgrade) + age + tsize + estrec , data = GBSG2_factored)
+
+tbl_regression(cox_strated , exponentiate = TRUE , include = horTh)
+```
+
+After refitting the model, we get a very similar hazard ratio of 0.68, and similar 95% confidence interval, with a p-value of 0.003. This tells us that the estimated effect of the treatment is not affected by the violation for tumour grade.
+
+
+
+
+### 5.3 - Influential Observations
+
+Influential observations are ones which have a disproportionate effect on the estimated treatment. To identify these, we compute delta-beta residuals for the hormone therapy coefficient. Each value estimates the change in the estimated hormone therapy coefficient if the individual was removed from the dataset.
+
+
+```{r influential observations , echo = FALSE}
+dfbeta_resids <- residuals(cox_revised, type = "dfbeta")
+colnames(dfbeta_resids) <- names(coef(cox_revised))
+
+plot(dfbeta_resids[ , "horThyes"] , pch = 16 , cex = 0.6 ,
+     ylab = "Change in coefficient for horTh",
+     main = "Influence on the hormonal therapy coefficient")
+abline(h = 0, lty = 2 , col = "red" , lwd = 2)
+```
+
+We can see that the residuals are distributed symmetrically about zero, and there are no real outliers. There is therefore no evidence that the estimated treatment effect is influenced heavily by a small number of individuals, which is a positive outcome.
+
+
+### 5.4 - Assessing overall model fit
+
+To identify poorly fitted individuals, and to check for a pattern of poor fit across different levels of predicted risk, we plot deviance residuals against the risk score
+
+```{r overall model fit , echo = FALSE}
+dev_resids <- residuals(cox_revised , type = "deviance")
+risk_score <- cox_revised$linear.predictors + sum(coef(cox_revised) * cox_revised$means)
+
+plot(dev_resids ~ risk_score , pch = 16 , cex = 0.6 , ylim = c(-4 , 4) , 
+     main = "Deviance Residuals vs risk score" , 
+     xlab = "Risk Score" , 
+     ylab = "Deviance Residuals")
+abline(h = c(-3 , 0 , 3) , lty = c(2 , 1 , 2))
+lines(lowess(risk_score , dev_resids) , col = "red" , lwd = 2)
+```
+
+We can see from the plot there are two clear bands, and this splits up those who experienced recurrence (those above 0), and those were censored (those below 0). There is one individual with deviance residual greater than 3, however this is expected in a large sample of 686. The smoother has a slight positive gradient, indicating that the model slightly underestimates the difference between risk in low risk and high risk individuals. However, the smoother is still relatively close to zero over the whole range, so there is limited evidence.
+
+
+
+### 5.5 - Model checking summary 
+
+
+```{r model checking summary, echo = FALSE}
+tbl_stack(
+  list(
+tbl_regression(cox_hormonal_unadjusted, exponentiate = TRUE, include = horTh) ,
+tbl_regression(cox_adjusted, exponentiate = TRUE, include = horTh) ,
+tbl_regression(cox_revised, exponentiate = TRUE, include = horTh) ,
+tbl_regression(cox_strated, exponentiate = TRUE, include = horTh)
+  ) , 
+  group_header = c(
+    "Unadjusted" ,
+    "Adjusted (linear covariates)" ,
+    "Adjusted (revised, final model)" ,
+    "Stratified by tumour grade"
+))
+```
+
+
+The model checks in section 5 show us that the final model is the most appropriate. This is after checking the martingale residual plots, proportional hazards assumption and influential points. The model was revised afterwards, with each check in mind, and the estimated treatment effect was essentially unchanged. 
+
+
+
+## 6 - Discussion
+
+### 6.1 Main findings
+
+We found that individuals who received hormone therapy had longer recurrence-free survival than those who did not. The Kaplan-Meier estimate showed a median recurrence-free survival of 2,018 days, compared to 1,528, and a three-year recurrence-free survival of 71% compared to 61%. The log-rank test provided sufficient evidence of a difference between the two groups (p = 0.003).
+
+In the unadjusted Cox regression model, hormone therapy was associated with a 31% lower hazard of recurrence (HR 0.69, 95% CI 0.54 to 0.89). After adjusting the model for baseline factors, and log-transforming the number of positive nodes and progesterone receptor level, the estimate was unchanged (HR 0.69, 95% CI 0.53 to 0.88).
+
+
+### 6.2 Clinical Interpretation
+
+The results from the survival analysis do indeed show an association between hormone therapy and an increase in recurrence-free survival in breast cancer. Around 10 more patients in every 100 were recurrence-free after three years in the group who received hormone therapy. The estimated hazard ratio is also consistent with the original randomised trial (RR 0.75 CI 0.54 - 1.04). This trial was smaller and hence the confidence interval included no effect.
+
+
+
+
+
+### 6.3 Limitations
+
+**Non-randomised Treatment**. In our dataset, the hormone therapy treatment was not randomly assigned for every individual. Older and post-menopausal individuals were more likely to receive treatment. We adjusted for age, and excluded menopausal status from the models, as these are closely linked. The results should therefore be interpreted as an association rather than a causal effect.
+
+**Proportional-hazards**. This assumption which underlies the Cox regression model was violated by several variables. Stratifying by tumour grade did not change the treatment effect, but other variables were not adjusted.
+
+**Follow-up**. The follow-up period was 2659 days (just over 7 years, 3 months), so recurrences that were later than this were not recorded. Recurrence risk persists beyond this period, particularly for hormone-receptor-positive disease.
+
+
+
+
+
+
+
+
+
+
+
+
