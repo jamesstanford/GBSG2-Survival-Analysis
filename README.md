@@ -1,8 +1,8 @@
 # Hormonal Therapy and Recurrence-Free Survival in Node-Positive Breast Cancer
 
-A survival analysis of the German Breast Cancer Study Group 2 (GBSG2) data, investigating whether hormonal therapy (tamoxifen) is associated with longer recurrence-free survival in women with node-positive breast cancer, and whether this association remains after adjusting for baseline patient and tumour characteristics.
+A survival analysis of the German Breast Cancer Study Group 2 (GBSG2) data, investigating whether hormonal therapy (tamoxifen) is associated with longer recurrence-free survival in women with node-positive breast cancer, and whether this association remains after adjusting for baseline patient characteristics.
 
-**Read the report:** [GBSG2_analysis.pdf](GBSG2_analysis.pdf)
+**Report:** [GBSG2_analysis.pdf](GBSG2_analysis.pdf)
 
 ## Data
 
@@ -28,11 +28,11 @@ The dataset contains more patients than were randomised in the original trial, a
 | Adjusted, final model | 0.69 (0.53 to 0.88) |
 | Stratified model | 0.68 (0.53 to 0.88) |
 
-- Hormonal therapy was associated with an estimated **31% lower hazard of recurrence**. The estimate was stable across model specifications and sensitivity analyses.
+- Hormonal therapy was associated with an estimated 31% lower hazard of recurrence. The estimate was stable across model specifications and sensitivity analyses.
 - Three-year recurrence-free survival was 71% with hormonal therapy, compared with 61% without.
 - Because treatment was not fully randomised, the results should be interpreted as an association rather than a causal effect.
 
 
 ## Author
 
-James Stanford,
+James Stanford
